@@ -1,88 +1,68 @@
+import os
+import json
+import random
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import random, datetime, json, os
 
-# Cấu trúc dữ liệu người chơi
-user_data = {}
+DATA_FILE = "gmeow_data.json"
+TOKEN = os.getenv("7423055994:AAGyBcm2CYcKBurv8gDQVMF4E2QSLhWwarc")
 
-# Danh sách phần thưởng
-rewards = [
-    {"name": "Old Yarn Ball", "desc": "Still good... maybe.", "points": 1},
-    {"name": "7-day-old Fish", "desc": "A bit smelly but still edible.", "points": 2},
-    {"name": "Gmeow Rap CD", "desc": "Don't ever listen to it.", "points": 3},
-    {"name": "Falling Soap", "desc": "Drama everywhere!", "points": 3},
-    {"name": "First GMEOW Coin", "desc": "Plastic but precious.", "points": 4},
-    {"name": "Laptop Miner", "desc": "Mining with MS Paint!", "points": 5},
-    {"name": "Moon Ticket", "desc": "One way only!", "points": 6},
-    {"name": "Dice of Fate", "desc": "You rolled a 9!", "points": 7},
-    {"name": "Gmeow Trolled You", "desc": "No reward, just a smile.", "points": 0},
-    {"name": "Gmeow on Fire!", "desc": "Super rare!", "points": 10},
+REWARDS = [
+    {"name": "Golden Hairball", "points": 100, "desc": "The mythical treasure of memecats."},
+    {"name": "Used Sock", "points": 5, "desc": "It's warm... and suspiciously damp."},
+    {"name": "Laser Pointer", "points": 10, "desc": "Distracting but fun!"},
+    {"name": "Empty Box", "points": 0, "desc": "The real gift is disappointment."},
+    {"name": "Tuna Can", "points": 30, "desc": "Vintage 2022. Smells divine."}
 ]
 
 def load_data():
-    global user_data
-    if os.path.exists("gmeow_data.json"):
-        with open("gmeow_data.json", "r") as f:
-            user_data = json.load(f)
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    return {}
 
-def save_data():
-    with open("gmeow_data.json", "w") as f:
-        json.dump(user_data, f)
-
-def reset_weekly_scores():
-    for user in user_data.values():
-        user["score"] = 0
-    save_data()
-
-def get_today():
-    return datetime.datetime.utcnow().strftime('%Y-%m-%d')
+def save_data(data):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f)
 
 async def gmeow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    uid = str(user.id)
-    today = get_today()
+    user_id = str(update.effective_user.id)
+    username = update.effective_user.username or "Anonymous"
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    data = load_data()
+    user = data.get(user_id, {"points": 0, "uses": {}})
+    used_today = user["uses"].get(today, 0)
 
-    if uid not in user_data:
-        user_data[uid] = {"username": user.username or user.first_name, "score": 0, "last": today, "count": 0}
-    if user_data[uid]["last"] != today:
-        user_data[uid]["last"] = today
-        user_data[uid]["count"] = 0
-
-    if user_data[uid]["count"] >= 2:
-        await update.message.reply_text("🐾 You've used all your boxes for today. Come back tomorrow, meow!")
+    if used_today >= 2:
+        await update.message.reply_text("😿 You’ve already opened 2 boxes today!")
         return
 
-    reward = random.choice(rewards)
-    user_data[uid]["score"] += reward["points"]
-    user_data[uid]["count"] += 1
-    save_data()
+    reward = random.choice(REWARDS)
+    user["points"] += reward["points"]
+    user["uses"][today] = used_today + 1
+    data[user_id] = user
+    save_data(data)
 
-    msg = f"🎁 You got: *{reward['name']}*\n_{reward['desc']}_\nPoints: +{reward['points']}\n\n🐱 Total this week: {user_data[uid]['score']} pts"
-    await update.message.reply_markdown(msg)
-
-async def gmeowtop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    top = sorted(user_data.values(), key=lambda x: x['score'], reverse=True)[:10]
-    msg = "🏆 *Gmeow Weekly Leaderboard:*\n"
-    for i, user in enumerate(top, 1):
-        msg += f"{i}. {user['username']} — {user['score']} pts\n"
-    await update.message.reply_markdown(msg)
+    await update.message.reply_text(f"🎁 You got: *{reward['name']}* ({reward['points']} pts)\n_{reward['desc']}_", parse_mode="Markdown")
 
 async def mygmeow(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = str(update.effective_user.id)
-    today = get_today()
-    if uid not in user_data:
-        await update.message.reply_text("You haven't opened any boxes yet today.")
-        return
-    user = user_data[uid]
-    left = max(0, 2 - user["count"]) if user["last"] == today else 2
-    msg = f"😺 Your Gmeow Stats:\n• Weekly Score: {user['score']} pts\n• Boxes Opened Today: {user['count']}/2\n• Remaining: {left} box(es)"
-    await update.message.reply_text(msg)
+    user_id = str(update.effective_user.id)
+    data = load_data()
+    user = data.get(user_id, {"points": 0})
+    await update.message.reply_text(f"🐾 Your Gmeow Points: {user['points']}")
 
-if __name__ == "__main__":
-    load_data()
-    app = ApplicationBuilder().token("7423055994:AAGyBcm2CYcKBurv8gDQVMF4E2QSLhWwarc").build()
+async def gmeowtop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    leaderboard = sorted(data.items(), key=lambda x: x[1]['points'], reverse=True)[:10]
+    msg = "🏆 *Top 10 Gmeow Players:*\n"
+    for i, (uid, user) in enumerate(leaderboard, 1):
+        msg += f"{i}. {user.get('name', 'Unknown')} - {user['points']} pts\n"
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("Gmeow", gmeow))
-    app.add_handler(CommandHandler("Gmeowtop", gmeowtop))
     app.add_handler(CommandHandler("mygmeow", mygmeow))
-    print("Bot is running...")
+    app.add_handler(CommandHandler("Gmeowtop", gmeowtop))
     app.run_polling()
